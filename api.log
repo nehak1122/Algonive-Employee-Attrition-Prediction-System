@@ -1,0 +1,9 @@
+INFO:     Started server process [99160]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+[INFO] Loaded model: LogisticRegression
+[INFO] Features: 30
+INFO:     127.0.0.1:50213 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50215 - "GET /docs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50215 - "GET /openapi.json HTTP/1.1" 200 OK

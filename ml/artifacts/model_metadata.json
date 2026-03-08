@@ -1,0 +1,68 @@
+{
+  "best_model": "LogisticRegression",
+  "best_metrics": {
+    "accuracy": 0.7353,
+    "precision": 0.3298,
+    "recall": 0.6327,
+    "f1_score": 0.4336,
+    "roc_auc": 0.7476
+  },
+  "all_results": {
+    "LogisticRegression": {
+      "accuracy": 0.7353,
+      "precision": 0.3298,
+      "recall": 0.6327,
+      "f1_score": 0.4336,
+      "roc_auc": 0.7476
+    },
+    "RandomForest": {
+      "accuracy": 0.8497,
+      "precision": 0.6154,
+      "recall": 0.1633,
+      "f1_score": 0.2581,
+      "roc_auc": 0.7498
+    },
+    "XGBoost": {
+      "accuracy": 0.8497,
+      "precision": 0.5556,
+      "recall": 0.3061,
+      "f1_score": 0.3947,
+      "roc_auc": 0.7767
+    }
+  },
+  "feature_columns": [
+    "Age",
+    "BusinessTravel",
+    "DailyRate",
+    "Department",
+    "DistanceFromHome",
+    "Education",
+    "EducationField",
+    "EnvironmentSatisfaction",
+    "Gender",
+    "HourlyRate",
+    "JobInvolvement",
+    "JobLevel",
+    "JobRole",
+    "JobSatisfaction",
+    "MaritalStatus",
+    "MonthlyIncome",
+    "MonthlyRate",
+    "NumCompaniesWorked",
+    "OverTime",
+    "PercentSalaryHike",
+    "PerformanceRating",
+    "RelationshipSatisfaction",
+    "StockOptionLevel",
+    "TotalWorkingYears",
+    "TrainingTimesLastYear",
+    "WorkLifeBalance",
+    "YearsAtCompany",
+    "YearsInCurrentRole",
+    "YearsSinceLastPromotion",
+    "YearsWithCurrManager"
+  ],
+  "n_features": 30,
+  "train_size": 1224,
+  "test_size": 306
+}
