@@ -207,7 +207,7 @@ st.sidebar.markdown("---")
 page = st.sidebar.radio(
     "Navigate",
     ["🏠 Overview", "📊 Department Analysis", "🔍 Feature Insights",
-     "🎯 Predict", "📂 Batch Predict", "📋 Data Explorer"],
+     "🎯 Predict", "🧪 What-If Simulator", "📂 Batch Predict", "📋 Data Explorer"],
     label_visibility="collapsed",
 )
 
@@ -684,6 +684,163 @@ elif page == "🎯 Predict":
                 )
                 st.plotly_chart(fig_gauge, use_container_width=True)
 
+                # SHAP explanation — why did the model say this?
+                st.markdown("### 🧠 Why This Prediction? (SHAP Explanation)")
+                try:
+                    exp_resp = requests.post(f"{API_URL}/explain", json=payload, timeout=15)
+                    if exp_resp.status_code == 200:
+                        exp = exp_resp.json()
+                        exp_df = pd.DataFrame(exp["top_contributors"])
+                        exp_df["color"] = exp_df["impact"].apply(lambda v: "#ff416c" if v > 0 else "#43e97b")
+                        fig_shap = go.Figure(go.Bar(
+                            x=exp_df["impact"],
+                            y=exp_df["feature"],
+                            orientation="h",
+                            marker_color=exp_df["color"],
+                        ))
+                        fig_shap.update_layout(
+                            title="Top Factors Pushing This Employee's Risk Up (red) or Down (green)",
+                            template=PLOTLY_TEMPLATE,
+                            height=400,
+                            paper_bgcolor="rgba(0,0,0,0)",
+                            plot_bgcolor="rgba(0,0,0,0)",
+                            font=dict(color=COLORS["text"]),
+                            xaxis_title="SHAP Impact on Attrition Probability",
+                            yaxis=dict(autorange="reversed"),
+                        )
+                        st.plotly_chart(fig_shap, use_container_width=True)
+                        st.caption(
+                            "Positive (red) bars push this specific employee toward leaving; "
+                            "negative (green) bars push toward staying."
+                        )
+                    else:
+                        st.info("SHAP explanation not available yet.")
+                except requests.ConnectionError:
+                    pass
+
+                if result["risk_level"] in ("High", "Medium"):
+                    st.info(
+                        "💡 This employee looks at risk. Head to **🧪 What-If Simulator** "
+                        "to test whether an HR action (like removing overtime) would actually help."
+                    )
+
+            else:
+                st.error(f"API Error: {resp.status_code} — {resp.text}")
+        except requests.ConnectionError:
+            st.error("⚠️ Cannot connect to the API. Make sure the FastAPI server is running on port 8000.")
+            st.code("cd EAPS && uvicorn api.main:app --port 8000 --reload", language="bash")
+
+
+elif page == "🧪 What-If Simulator":
+    st.markdown("## 🧪 What-If Intervention Simulator")
+    st.markdown(
+        "Most attrition tools stop at *predicting* who might leave. This simulator "
+        "goes further — it takes an at-risk employee, applies a realistic HR action, "
+        "and checks whether the model's predicted risk **actually goes down**."
+    )
+    st.markdown("---")
+
+    with st.form("simulator_form"):
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            st.markdown("#### 👤 Personal Info")
+            age = st.slider("Age", 18, 65, 29, key="sim_age")
+            gender = st.selectbox("Gender", ["Male", "Female"], key="sim_gender")
+            marital_status = st.selectbox("Marital Status", ["Single", "Married", "Divorced"], key="sim_marital")
+            distance = st.slider("Distance From Home (km)", 1, 30, 15, key="sim_distance")
+
+        with col2:
+            st.markdown("#### 💼 Job Info")
+            department = st.selectbox("Department", [
+                "Research & Development", "Sales", "Human Resources"
+            ], key="sim_dept")
+            job_role = st.selectbox("Job Role", [
+                "Sales Executive", "Research Scientist", "Laboratory Technician",
+                "Manufacturing Director", "Healthcare Representative",
+                "Manager", "Sales Representative", "Research Director",
+                "Human Resources"
+            ], key="sim_role")
+            overtime = st.selectbox("Overtime", ["Yes", "No"], index=0, key="sim_overtime")
+            job_satisfaction = st.slider("Job Satisfaction", 1, 4, 2, key="sim_jobsat")
+
+        with col3:
+            st.markdown("#### 💰 Compensation & Experience")
+            monthly_income = st.number_input("Monthly Income (₹)", 1000, 200000, 3200, step=500, key="sim_income")
+            work_life = st.slider("Work-Life Balance", 1, 4, 2, key="sim_wlb")
+            stock_option = st.slider("Stock Option Level", 0, 3, 0, key="sim_stock")
+            years_company = st.slider("Years at Company", 0, 40, 3, key="sim_years")
+
+        run_all = st.form_submit_button("🧪 Test All Interventions", use_container_width=True)
+
+    if run_all:
+        payload = {
+            "Age": age, "BusinessTravel": "Travel_Rarely", "DailyRate": 800,
+            "Department": department, "DistanceFromHome": distance, "Education": 3,
+            "EducationField": "Life Sciences", "EnvironmentSatisfaction": 3,
+            "Gender": gender, "HourlyRate": 65, "JobInvolvement": 3, "JobLevel": 1,
+            "JobRole": job_role, "JobSatisfaction": job_satisfaction,
+            "MaritalStatus": marital_status, "MonthlyIncome": monthly_income,
+            "MonthlyRate": 15000, "NumCompaniesWorked": 2, "OverTime": overtime,
+            "PercentSalaryHike": 12, "PerformanceRating": 3, "RelationshipSatisfaction": 3,
+            "StockOptionLevel": stock_option, "TotalWorkingYears": years_company + 1,
+            "TrainingTimesLastYear": 2, "WorkLifeBalance": work_life,
+            "YearsAtCompany": years_company, "YearsInCurrentRole": min(years_company, 2),
+            "YearsSinceLastPromotion": 1, "YearsWithCurrManager": min(years_company, 2),
+        }
+
+        try:
+            resp = requests.post(
+                f"{API_URL}/simulate-intervention",
+                json={"employee": payload},
+                timeout=20,
+            )
+            if resp.status_code == 200:
+                results = resp.json()["results"]
+                baseline = results[0]["probability_before"]
+
+                st.markdown("---")
+                st.markdown(f"### 📊 Baseline Attrition Risk: **{baseline:.1%}**")
+
+                bar_df = pd.DataFrame(results)
+                fig_compare = go.Figure()
+                fig_compare.add_trace(go.Bar(
+                    name="Before", x=bar_df["intervention_label"], y=bar_df["probability_before"],
+                    marker_color="#ff416c",
+                ))
+                fig_compare.add_trace(go.Bar(
+                    name="After", x=bar_df["intervention_label"], y=bar_df["probability_after"],
+                    marker_color="#43e97b",
+                ))
+                fig_compare.update_layout(
+                    title="Predicted Attrition Risk: Before vs After Each Intervention",
+                    template=PLOTLY_TEMPLATE,
+                    barmode="group",
+                    height=450,
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    font=dict(color=COLORS["text"]),
+                    yaxis_title="Attrition Probability",
+                    yaxis_tickformat=".0%",
+                )
+                st.plotly_chart(fig_compare, use_container_width=True)
+
+                st.markdown("### 📋 Ranked by Effectiveness")
+                for r in results:
+                    icon = "✅" if r["helped"] else "⚠️"
+                    st.markdown(
+                        f"{icon} **{r['intervention_label']}** — "
+                        f"{r['probability_before']:.1%} → {r['probability_after']:.1%} "
+                        f"({'-' if r['helped'] else '+'}{abs(r['relative_reduction_pct']):.1f}% relative change)"
+                    )
+
+                best = results[0]
+                if best["helped"]:
+                    st.success(
+                        f"🏆 Best action: **{best['intervention_label']}** — cuts predicted "
+                        f"attrition risk by {best['relative_reduction_pct']:.1f}% "
+                        f"({best['probability_before']:.1%} → {best['probability_after']:.1%})."
+                    )
             else:
                 st.error(f"API Error: {resp.status_code} — {resp.text}")
         except requests.ConnectionError:

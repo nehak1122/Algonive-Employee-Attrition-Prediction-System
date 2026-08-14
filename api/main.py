@@ -19,6 +19,10 @@ from typing import Optional
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ARTIFACTS_DIR = os.path.join(BASE_DIR, "ml", "artifacts")
 
+sys.path.insert(0, BASE_DIR)
+from ml.shap_explainer import build_explainer, explain_instance
+from ml.intervention_simulator import simulate_intervention, simulate_all_interventions, INTERVENTIONS
+
 app = FastAPI(
     title="EAPS - Employee Attrition Prediction System",
     description="Predict employee attrition risk using ML models",
@@ -41,11 +45,13 @@ feature_columns = None
 encoders = {}
 metadata = None
 feature_importance = None
+shap_importance = None
+shap_state = {"explainer": None, "kind": None}
 
 
 def load_artifacts():
     """Load all saved model artifacts."""
-    global model, scaler, feature_columns, encoders, metadata, feature_importance
+    global model, scaler, feature_columns, encoders, metadata, feature_importance, shap_importance
 
     model = joblib.load(os.path.join(ARTIFACTS_DIR, "best_model.pkl"))
     scaler = joblib.load(os.path.join(ARTIFACTS_DIR, "scaler.pkl"))
@@ -56,6 +62,11 @@ def load_artifacts():
 
     with open(os.path.join(ARTIFACTS_DIR, "feature_importance.json"), "r") as f:
         feature_importance = json.load(f)
+
+    shap_importance_path = os.path.join(ARTIFACTS_DIR, "shap_importance.json")
+    if os.path.exists(shap_importance_path):
+        with open(shap_importance_path, "r") as f:
+            shap_importance = json.load(f)
 
     # Load label encoders
     categorical_cols = [
@@ -69,6 +80,42 @@ def load_artifacts():
 
     print(f"[INFO] Loaded model: {metadata['best_model']}")
     print(f"[INFO] Features: {len(feature_columns)}")
+
+    _build_shap_explainer()
+
+
+def _build_shap_explainer():
+    """Build (once) the SHAP explainer used for per-employee explanations.
+
+    Uses a small sample of the raw training CSVs, run through the same
+    preprocessing pipeline as inference, as the background distribution.
+    """
+    try:
+        file1 = os.path.join(BASE_DIR, "HR_Analytics.csv")
+        file2 = os.path.join(BASE_DIR, "WA_Fn-UseC_-HR-Employee-Attrition.csv")
+        frames = [pd.read_csv(f) for f in (file1, file2) if os.path.exists(f)]
+        if not frames:
+            return
+        raw = pd.concat(frames, ignore_index=True).sample(min(100, sum(len(f) for f in frames)), random_state=42)
+        rows = raw.to_dict(orient="records")
+        processed_rows = []
+        for row in rows:
+            try:
+                processed_rows.append(preprocess_input(row))
+            except Exception:
+                continue
+        background = pd.concat(processed_rows, ignore_index=True) if processed_rows else None
+        if background is None or background.empty:
+            return
+        background = background.dropna()
+        if background.empty:
+            return
+        explainer, kind = build_explainer(model, background)
+        shap_state["explainer"] = explainer
+        shap_state["kind"] = kind
+        print(f"[INFO] SHAP explainer ready ({kind})")
+    except Exception as e:
+        print(f"[WARNING] Could not build SHAP explainer: {e}")
 
 
 @app.on_event("startup")
@@ -121,6 +168,11 @@ class PredictionResponse(BaseModel):
     top_factors: dict
 
 
+class InterventionRequest(BaseModel):
+    employee: EmployeeInput
+    intervention: Optional[str] = None  # if None, simulate every known intervention
+
+
 def preprocess_input(data: dict) -> pd.DataFrame:
     """Preprocess a single input dict into model-ready format."""
     df = pd.DataFrame([data])
@@ -150,6 +202,12 @@ def preprocess_input(data: dict) -> pd.DataFrame:
     df[feature_columns] = scaler.transform(df[feature_columns])
 
     return df
+
+
+def predict_proba_for_dict(data: dict) -> float:
+    """Run the full inference pipeline on a raw (unencoded) employee dict."""
+    df = preprocess_input(data)
+    return float(model.predict_proba(df)[0][1])
 
 
 # --- Endpoints ---
@@ -247,3 +305,59 @@ async def get_feature_importance():
     if feature_importance is None:
         raise HTTPException(status_code=503, detail="Feature importance not loaded.")
     return feature_importance
+
+
+@app.get("/shap-importance")
+async def get_shap_importance():
+    """Return SHAP-based global feature importance (mean |SHAP value| per feature)."""
+    if shap_importance is None:
+        raise HTTPException(status_code=503, detail="SHAP importance not available. Retrain the model.")
+    return shap_importance
+
+
+@app.post("/explain")
+async def explain(employee: EmployeeInput):
+    """Explain a single prediction with SHAP: which features pushed this specific
+    employee's risk up or down, and by how much."""
+    if model is None:
+        raise HTTPException(status_code=503, detail="Model not loaded. Train the model first.")
+    if shap_state["explainer"] is None:
+        raise HTTPException(status_code=503, detail="SHAP explainer not available.")
+
+    data = employee.model_dump()
+    df = preprocess_input(data)
+    contributions = explain_instance(shap_state["explainer"], shap_state["kind"], df, feature_columns)
+
+    return {
+        "probability": round(float(model.predict_proba(df)[0][1]), 4),
+        "top_contributors": contributions[:10],
+    }
+
+
+@app.post("/simulate-intervention")
+async def simulate_intervention_endpoint(request: InterventionRequest):
+    """Test whether a realistic HR action (e.g. removing overtime) actually lowers
+    this employee's predicted attrition risk — not just predicting risk, but
+    checking whether fixing the flagged problem works."""
+    if model is None:
+        raise HTTPException(status_code=503, detail="Model not loaded. Train the model first.")
+
+    data = request.employee.model_dump()
+
+    if request.intervention:
+        if request.intervention not in INTERVENTIONS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown intervention '{request.intervention}'. Choose from: {list(INTERVENTIONS.keys())}",
+            )
+        result = simulate_intervention(data, request.intervention, predict_proba_for_dict)
+        return {"results": [result]}
+
+    results = simulate_all_interventions(data, predict_proba_for_dict)
+    return {"results": results}
+
+
+@app.get("/interventions")
+async def list_interventions():
+    """List the available what-if interventions the simulator supports."""
+    return {"interventions": list(INTERVENTIONS.keys())}

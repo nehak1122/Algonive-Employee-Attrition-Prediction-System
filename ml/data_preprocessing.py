@@ -8,6 +8,7 @@ import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, StandardScaler
+from imblearn.over_sampling import SMOTE
 import joblib
 
 
@@ -130,8 +131,24 @@ def scale_features(df: pd.DataFrame, artifacts_dir: str, fit: bool = True):
     return df, scaler, feature_cols
 
 
-def prepare_data(data_dir: str, artifacts_dir: str, test_size: float = 0.2, random_state: int = 42):
-    """Full preprocessing pipeline: load, clean, encode, scale, split."""
+def balance_with_smote(X_train: pd.DataFrame, y_train: pd.Series, random_state: int = 42):
+    """Oversample the minority (attrition=Yes) class in the TRAINING set only using SMOTE.
+
+    SMOTE is applied strictly after the train/test split so the test set stays a true,
+    untouched reflection of real-world class imbalance — only the model's training
+    signal is rebalanced.
+    """
+    before_counts = y_train.value_counts().to_dict()
+    smote = SMOTE(random_state=random_state)
+    X_res, y_res = smote.fit_resample(X_train, y_train)
+    after_counts = y_res.value_counts().to_dict()
+    print(f"[INFO] SMOTE applied — before: {before_counts} | after: {after_counts}")
+    return X_res, y_res
+
+
+def prepare_data(data_dir: str, artifacts_dir: str, test_size: float = 0.2,
+                  random_state: int = 42, use_smote: bool = True):
+    """Full preprocessing pipeline: load, clean, encode, scale, split, (optionally) balance."""
     df = load_data(data_dir)
     df = clean_data(df)
     df, encoders = encode_features(df, artifacts_dir, fit=True)
@@ -146,6 +163,9 @@ def prepare_data(data_dir: str, artifacts_dir: str, test_size: float = 0.2, rand
 
     print(f"[INFO] Train: {len(X_train)} | Test: {len(X_test)}")
     print(f"[INFO] Attrition rate — Train: {y_train.mean():.2%} | Test: {y_test.mean():.2%}")
+
+    if use_smote:
+        X_train, y_train = balance_with_smote(X_train, y_train, random_state=random_state)
 
     return X_train, X_test, y_train, y_test, feature_cols
 

@@ -21,6 +21,7 @@ import joblib
 # Add parent dir to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ml.data_preprocessing import prepare_data
+from ml.shap_explainer import build_explainer, global_importance
 
 
 def get_models():
@@ -114,10 +115,23 @@ def train_and_select_best(data_dir: str, artifacts_dir: str):
     # Save model
     joblib.dump(best_model, os.path.join(artifacts_dir, "best_model.pkl"))
 
-    # Save feature importance
+    # Save feature importance (model's built-in importance)
     importance = get_feature_importance(best_model, feature_cols, best_model_name)
     with open(os.path.join(artifacts_dir, "feature_importance.json"), "w") as f:
         json.dump(importance, f, indent=2)
+
+    # Save SHAP-based global feature importance — a more faithful, model-agnostic
+    # measure of how much each feature actually pushes predictions, and the same
+    # engine used to explain individual employees at inference time.
+    try:
+        explainer, kind = build_explainer(best_model, X_train)
+        shap_sample = X_test.sample(min(100, len(X_test)), random_state=42)
+        shap_importance = global_importance(explainer, kind, shap_sample, feature_cols)
+        with open(os.path.join(artifacts_dir, "shap_importance.json"), "w") as f:
+            json.dump(shap_importance, f, indent=2)
+        print(f"[INFO] Saved SHAP global importance ({kind} explainer)")
+    except Exception as e:
+        print(f"[WARNING] Could not compute SHAP importance: {e}")
 
     # Save model metadata
     metadata = {
@@ -128,6 +142,7 @@ def train_and_select_best(data_dir: str, artifacts_dir: str):
         "n_features": len(feature_cols),
         "train_size": len(X_train),
         "test_size": len(X_test),
+        "class_imbalance_handling": "SMOTE (applied to training set only)",
     }
     with open(os.path.join(artifacts_dir, "model_metadata.json"), "w") as f:
         json.dump(metadata, f, indent=2)
