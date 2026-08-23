@@ -1,0 +1,26 @@
+# Runtime-only dependencies for the Render deployment.
+#
+# Deliberately EXCLUDES xgboost, imbalanced-learn, matplotlib and seaborn:
+# those are only imported by ml/train_model.py and ml/data_preprocessing.py.
+# The deployed app loads the pre-trained artifacts in ml/artifacts/ and never
+# retrains, so shipping them would just cost build time and disk.
+# Use the full requirements.txt locally when you want to retrain.
+#
+# Versions are pinned to the ones the artifacts were pickled with — a
+# scikit-learn or numpy mismatch can break joblib.load() at startup.
+
+numpy==2.4.2
+pandas==2.3.3
+scipy==1.17.1
+scikit-learn==1.8.0
+joblib==1.5.3
+
+shap==0.52.0
+
+fastapi==0.135.1
+uvicorn==0.41.0
+python-multipart==0.0.20
+
+streamlit==1.55.0
+plotly==6.6.0
+requests==2.32.3

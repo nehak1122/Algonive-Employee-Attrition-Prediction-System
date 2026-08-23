@@ -1,0 +1,36 @@
+# Render Blueprint — EAPS (Employee Attrition Prediction System)
+#
+# One web service runs BOTH processes in the same container:
+#   - FastAPI  on 127.0.0.1:8000  (internal only)
+#   - Streamlit on 0.0.0.0:$PORT  (public)
+#
+# Because they share a network namespace, the dashboard's existing
+# "http://localhost:8000" API calls keep working with no code change,
+# and there is only one cold start instead of two.
+
+services:
+  - type: web
+    name: eaps
+    runtime: python
+    plan: free
+    region: oregon
+    branch: main
+
+    buildCommand: pip install --upgrade pip && pip install -r requirements-render.txt
+    startCommand: bash start.sh
+
+    # Streamlit's built-in health endpoint.
+    healthCheckPath: /_stcore/health
+
+    autoDeploy: true
+
+    envVars:
+      # 3.12 has prebuilt wheels for every dep here (shap ships cp312-abi3).
+      - key: PYTHON_VERSION
+        value: "3.12.7"
+      # The dashboard reads this; the default is the same value.
+      - key: EAPS_API_URL
+        value: "http://127.0.0.1:8000"
+      # Keeps the build under the free-tier disk limit.
+      - key: PIP_NO_CACHE_DIR
+        value: "1"
